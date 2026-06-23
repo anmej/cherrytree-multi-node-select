@@ -446,6 +446,5 @@ void CtActions::command_selnode_str(const Glib::ustring& entryStr)
 void CtActions::command_palette()
 {
     std::string id = CtDialogs::dialog_palette(_pCtMainWin);
-    if (CtMenuAction* action = _pCtMainWin->get_ct_menu().find_action(id))
-        action->run_action();
+    _pCtMainWin->get_ct_menu().activate_action(id);
 }

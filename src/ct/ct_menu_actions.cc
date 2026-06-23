@@ -321,70 +321,70 @@ void CtMenu::init_actions(CtActions* pActions)
     }
     {
         const char* tree_cat = _("Tree");
-        _actions.push_back(CtMenuAction{tree_cat, "go_node_prev", "ct_go-back", _("Go _Back"), KB_ALT+CtConst::STR_KEY_LEFT,
+        _add_tree_action(CtTreeSelectionSemantics::NavigationToSingleRow, CtMenuAction{tree_cat, "go_node_prev", "ct_go-back", _("Go _Back"), KB_ALT+CtConst::STR_KEY_LEFT,
             _("Go to the Previous Visited Node"), sigc::mem_fun(*pActions, &CtActions::node_go_back)});
-        _actions.push_back(CtMenuAction{tree_cat, "go_node_next", "ct_go-forward", _("Go _Forward"), KB_ALT+CtConst::STR_KEY_RIGHT,
+        _add_tree_action(CtTreeSelectionSemantics::NavigationToSingleRow, CtMenuAction{tree_cat, "go_node_next", "ct_go-forward", _("Go _Forward"), KB_ALT+CtConst::STR_KEY_RIGHT,
             _("Go to the Next Visited Node"), sigc::mem_fun(*pActions, &CtActions::node_go_forward)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_add_node", "ct_tree-node-add", _("Add _Node..."), KB_CONTROL+"n",
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_add_node", "ct_tree-node-add", _("Add _Node..."), KB_CONTROL+"n",
             _("Add a Node having the same Parent of the Selected Node"), sigc::mem_fun(*pActions, &CtActions::node_add)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_add_subnode", "ct_tree-subnode-add", _("Add _Subnode..."), KB_CONTROL+KB_SHIFT+"n",
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_add_subnode", "ct_tree-subnode-add", _("Add _Subnode..."), KB_CONTROL+KB_SHIFT+"n",
             _("Add a Child Node to the Selected Node"), sigc::mem_fun(*pActions, &CtActions::node_child_add)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_dup_node", "ct_tree-node-dupl", _("_Duplicate Node"), KB_CONTROL+KB_SHIFT+"d",
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_dup_node", "ct_tree-node-dupl", _("_Duplicate Node"), KB_CONTROL+KB_SHIFT+"d",
             _("Duplicate the Selected Node"), sigc::mem_fun(*pActions, &CtActions::node_duplicate)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_dup_node_subnodes", "ct_tree-nodesub-dupl", _("Duplicate Node _and Subnodes"), None,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_dup_node_subnodes", "ct_tree-nodesub-dupl", _("Duplicate Node _and Subnodes"), None,
             _("Duplicate the Selected Node and the Subnodes"), sigc::mem_fun(*pActions, &CtActions::node_subnodes_duplicate)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_shared_node", "ct_tree-node-shared", _("_Create Shared Node"), None,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_shared_node", "ct_tree-node-shared", _("_Create Shared Node"), None,
             _("Create a New Node Sharing the Same Data of the Selected Node"), sigc::mem_fun(*pActions, &CtActions::node_make_shared)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_copy_node_subnodes", "ct_edit_copy", _("Copy Node and S_ubnodes"), None,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_copy_node_subnodes", "ct_edit_copy", _("Copy Node and S_ubnodes"), None,
             _("Copy the Selected Node and the Subnodes"), sigc::mem_fun(*pActions, &CtActions::node_subnodes_copy)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_paste_node_subnodes", "ct_edit_paste", _("_Paste Node and Subnodes"), None,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_paste_node_subnodes", "ct_edit_paste", _("_Paste Node and Subnodes"), None,
             _("Paste the Copied Node and Subnodes"), sigc::mem_fun(*pActions, &CtActions::node_subnodes_paste)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_date_root", "ct_calendar", _("Insert _Today's Node Under Tree Root"), "F8",
+        _add_tree_action(CtTreeSelectionSemantics::NavigationToSingleRow, CtMenuAction{tree_cat, "tree_node_date_root", "ct_calendar", _("Insert _Today's Node Under Tree Root"), "F8",
             _("Insert a Node with Hierarchy Year/Month/Day for Today Under the Tree Root"), sigc::mem_fun(*pActions, &CtActions::node_date_from_root)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_date_sel", "ct_calendar", _("Insert Toda_y's Node Under Selected Node"), KB_CONTROL+"F8",
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_node_date_sel", "ct_calendar", _("Insert Toda_y's Node Under Selected Node"), KB_CONTROL+"F8",
             _("Insert a Node with Hierarchy Year/Month/Day for Today Under the Selected Node"), sigc::mem_fun(*pActions, &CtActions::node_date_from_sel)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_date_tomorrow_root", "ct_calendar", _("Insert T_omorrow's Node Under Tree Root"), KB_CONTROL+"F10",
+        _add_tree_action(CtTreeSelectionSemantics::NavigationToSingleRow, CtMenuAction{tree_cat, "tree_node_date_tomorrow_root", "ct_calendar", _("Insert T_omorrow's Node Under Tree Root"), KB_CONTROL+"F10",
             _("Insert a Node with Hierarchy Year/Month/Day for Tomorrow Under the Tree Root"), sigc::mem_fun(*pActions, &CtActions::node_date_tomorrow_from_root)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_date_tomorrow_sel", "ct_calendar", _("Insert Tomorro_w's Node Under Selected Node"), KB_CONTROL+KB_SHIFT+"F10",
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_node_date_tomorrow_sel", "ct_calendar", _("Insert Tomorro_w's Node Under Selected Node"), KB_CONTROL+KB_SHIFT+"F10",
             _("Insert a Node with Hierarchy Year/Month/Day for Tomorrow Under the Selected Node"), sigc::mem_fun(*pActions, &CtActions::node_date_tomorrow_from_sel)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_prop", "ct_cherry_edit", _("C_hange Node Properties..."), "F2",
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_node_prop", "ct_cherry_edit", _("C_hange Node Properties..."), "F2",
             _("Edit the Properties of the Selected Node"), sigc::mem_fun(*pActions, &CtActions::node_edit)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_toggle_ro", "ct_locked", _("Toggle _Read Only"), KB_SHIFT+KB_ALT+"r",
+        _add_tree_action(CtTreeSelectionSemantics::BatchPhysicalRows, CtMenuAction{tree_cat, "tree_node_toggle_ro", "ct_locked", _("Toggle _Read Only"), KB_SHIFT+KB_ALT+"r",
             _("Toggle the Read Only Property of the Selected Node"), sigc::mem_fun(*pActions, &CtActions::node_toggle_read_only)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_link", "ct_node_link", _("Cop_y Link to Node"), None,
+        _add_tree_action(CtTreeSelectionSemantics::BatchPhysicalRows, CtMenuAction{tree_cat, "tree_node_link", "ct_node_link", _("Cop_y Link to Node"), None,
             _("Copy Link to the Selected Node to Clipboard"), sigc::mem_fun(*pActions, &CtActions::node_link_to_clipboard)});
-        _actions.push_back(CtMenuAction{tree_cat, "child_nodes_inherit_syntax", "ct_execute", _("Children _Inherit Syntax"), None,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "child_nodes_inherit_syntax", "ct_execute", _("Children _Inherit Syntax"), None,
             _("Change the Selected Node's Children Syntax Highlighting to the Parent's Syntax Highlighting"),
             sigc::mem_fun(*pActions, &CtActions::node_inherit_syntax)});
-        _actions.push_back(CtMenuAction{tree_cat, "handle_bookmarks", "ct_edit", _("_Handle Bookmarks..."), None,
+        _add_tree_action(CtTreeSelectionSemantics::SelectionIndependent, CtMenuAction{tree_cat, "handle_bookmarks", "ct_edit", _("_Handle Bookmarks..."), None,
             _("Handle the Bookmarks List"), sigc::mem_fun(*pActions, &CtActions::bookmarks_handle)});
-        _actions.push_back(CtMenuAction{tree_cat, "node_bookmark", "ct_pin-add", _("Add to Boo_kmarks"), KB_CONTROL+KB_SHIFT+"k",
+        _add_tree_action(CtTreeSelectionSemantics::BatchPhysicalRows, CtMenuAction{tree_cat, "node_bookmark", "ct_pin-add", _("Add to Boo_kmarks"), KB_CONTROL+KB_SHIFT+"k",
             _("Add the Current Node to the Bookmarks List"), sigc::mem_fun(*pActions, &CtActions::bookmark_curr_node)});
-        _actions.push_back(CtMenuAction{tree_cat, "node_unbookmark", "ct_pin-remove", _("Remove from Boo_kmarks"), KB_SHIFT+KB_ALT+"k",
+        _add_tree_action(CtTreeSelectionSemantics::BatchPhysicalRows, CtMenuAction{tree_cat, "node_unbookmark", "ct_pin-remove", _("Remove from Boo_kmarks"), KB_SHIFT+KB_ALT+"k",
             _("Remove the Current Node from the Bookmarks List"), sigc::mem_fun(*pActions, &CtActions::bookmark_curr_node_remove)});
-        _actions.push_back(CtMenuAction{tree_cat, "nodes_all_expand", "ct_zoom-in", _("E_xpand All Nodes"), KB_CONTROL+KB_SHIFT+"e",
+        _add_tree_action(CtTreeSelectionSemantics::SelectionIndependent, CtMenuAction{tree_cat, "nodes_all_expand", "ct_zoom-in", _("E_xpand All Nodes"), KB_CONTROL+KB_SHIFT+"e",
             _("Expand All the Tree Nodes"), sigc::mem_fun(*pActions, &CtActions::nodes_expand_all)});
-        _actions.push_back(CtMenuAction{tree_cat, "nodes_all_collapse", "ct_zoom-out", _("_Collapse All Nodes"), KB_CONTROL+KB_SHIFT+"l",
+        _add_tree_action(CtTreeSelectionSemantics::SelectionIndependent, CtMenuAction{tree_cat, "nodes_all_collapse", "ct_zoom-out", _("_Collapse All Nodes"), KB_CONTROL+KB_SHIFT+"l",
             _("Collapse All the Tree Nodes"), sigc::mem_fun(*pActions, &CtActions::nodes_collapse_all)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_up", "ct_go-up", _("Node _Up"), KB_SHIFT+KB_ALT+CtConst::STR_KEY_UP,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_node_up", "ct_go-up", _("Node _Up"), KB_SHIFT+KB_ALT+CtConst::STR_KEY_UP,
             _("Move the Selected Node Up"), sigc::mem_fun(*pActions, &CtActions::node_up)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_down", "ct_go-down", _("Node _Down"), KB_SHIFT+KB_ALT+CtConst::STR_KEY_DOWN,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_node_down", "ct_go-down", _("Node _Down"), KB_SHIFT+KB_ALT+CtConst::STR_KEY_DOWN,
             _("Move the Selected Node Down"), sigc::mem_fun(*pActions, &CtActions::node_down)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_left", "ct_go-back", _("Node _Left"), KB_SHIFT+KB_ALT+CtConst::STR_KEY_LEFT,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_node_left", "ct_go-back", _("Node _Left"), KB_SHIFT+KB_ALT+CtConst::STR_KEY_LEFT,
             _("Move the Selected Node Left"), sigc::mem_fun(*pActions, &CtActions::node_left)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_right", "ct_go-forward", _("Node _Right"), KB_SHIFT+KB_ALT+CtConst::STR_KEY_RIGHT,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_node_right", "ct_go-forward", _("Node _Right"), KB_SHIFT+KB_ALT+CtConst::STR_KEY_RIGHT,
             _("Move the Selected Node Right"), sigc::mem_fun(*pActions, &CtActions::node_right)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_new_father", "ct_go-jump", _("Node Change _Parent..."), KB_SHIFT+KB_ALT+"j",
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_node_new_father", "ct_go-jump", _("Node Change _Parent..."), KB_SHIFT+KB_ALT+"j",
             _("Change the Selected Node's Parent"), sigc::mem_fun(*pActions, &CtActions::node_change_father)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_all_sort_asc", "ct_sort-asc", _("Sort Tree _Ascending"), None,
+        _add_tree_action(CtTreeSelectionSemantics::PreserveSelectionAndRefreshOrder, CtMenuAction{tree_cat, "tree_all_sort_asc", "ct_sort-asc", _("Sort Tree _Ascending"), None,
             _("Sort the Tree Ascending"), sigc::mem_fun(*pActions, &CtActions::tree_sort_ascending)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_all_sort_desc", "ct_sort-desc", _("Sort Tree _Descending"), None,
+        _add_tree_action(CtTreeSelectionSemantics::PreserveSelectionAndRefreshOrder, CtMenuAction{tree_cat, "tree_all_sort_desc", "ct_sort-desc", _("Sort Tree _Descending"), None,
             _("Sort the Tree Descending"), sigc::mem_fun(*pActions, &CtActions::tree_sort_descending)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_sibl_sort_asc", "ct_sort-asc", _("Sort Siblings A_scending"), None,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_sibl_sort_asc", "ct_sort-asc", _("Sort Siblings A_scending"), None,
             _("Sort all the Siblings of the Selected Node Ascending"), sigc::mem_fun(*pActions, &CtActions::node_siblings_sort_ascending)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_sibl_sort_desc", "ct_sort-desc", _("Sort Siblings D_escending"), None,
+        _add_tree_action(CtTreeSelectionSemantics::SinglePhysicalRow, CtMenuAction{tree_cat, "tree_sibl_sort_desc", "ct_sort-desc", _("Sort Siblings D_escending"), None,
             _("Sort all the Siblings of the Selected Node Descending"), sigc::mem_fun(*pActions, &CtActions::node_siblings_sort_descending)});
-        _actions.push_back(CtMenuAction{tree_cat, "tree_node_del", "ct_edit_delete", _("De_lete Node"), None,
+        _add_tree_action(CtTreeSelectionSemantics::BatchPhysicalRows, CtMenuAction{tree_cat, "tree_node_del", "ct_edit_delete", _("De_lete Node"), None,
             _("Delete the Selected Node"), sigc::mem_fun(*pActions, &CtActions::node_delete)});
     }
     {
@@ -539,7 +539,9 @@ void CtMenu::init_actions(CtActions* pActions)
         // by default actions will have prefix 'win.'
         // (the menu uses not actions, but accelerators)
         for (const CtMenuAction& action : _actions) {
-            pActions->getCtMainWin()->add_action(action.id, action.run_action);
+            pActions->getCtMainWin()->add_action(
+                action.id,
+                sigc::bind(sigc::mem_fun(*this, &CtMenu::_activate_action_immediate), action.id));
         }
     }
     {

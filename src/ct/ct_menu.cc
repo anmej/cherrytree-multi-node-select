@@ -87,10 +87,8 @@ std::vector<Gtk::Box*> CtMenu::build_toolbars4(Gtk::MenuButton*& pRecentDocsMenu
             std::string tooltip = open_file_action ? open_file_action->desc : _("Open File");
             open_btn->set_tooltip_text(tooltip);
             
-            if (open_file_action and open_file_action->run_action) {
-                open_btn->signal_clicked().connect([open_file_action](){
-                    open_file_action->run_action();
-                });
+            if (open_file_action) {
+                open_btn->set_action_name("win.ct_open_file");
             }
             btn_container->append(*open_btn);
             
@@ -144,11 +142,7 @@ std::vector<Gtk::Box*> CtMenu::build_toolbars4(Gtk::MenuButton*& pRecentDocsMenu
             button->set_tooltip_text(tooltip);
         }
 
-        button->signal_clicked().connect([action](){
-            if (action->run_action) {
-                action->run_action();
-            }
-        });
+        button->set_action_name(std::string("win.") + action->id);
         current_toolbar->append(*button);
         _gtk4ActionWidgets[action->id] = button;
         action->signal_set_sensitive = [button](bool sensitive) {
@@ -262,7 +256,7 @@ Glib::RefPtr<Gio::Menu> CtMenu::_build_gio_menu4()
                 continue;
             }
             ensure_section(stack.back());
-            stack.back().section->append(action->name, std::string("app.") + action->id);
+            stack.back().section->append(action->name, std::string("win.") + action->id);
             continue;
         }
 
@@ -328,7 +322,7 @@ void CtMenu::update_bookmarks_gio_menu4(const std::list<std::tuple<gint64, Glib:
                 const gint64 node_id   = std::get<0>(bk);
                 const Glib::ustring& title = std::get<1>(bk);
                 auto item = Gio::MenuItem::create(title, "");
-                item->set_action_and_target("app.goto_bookmark",
+                item->set_action_and_target("win.goto_bookmark",
                     Glib::Variant<gint64>::create(node_id));
                 gioMenu->append_item(item);
             }
@@ -347,7 +341,7 @@ void CtMenu::update_recent_docs_gio_menu4(const CtRecentDocsFilepaths& recentDoc
             const std::string path_str = path.string();
             const Glib::ustring filepath{path_str};
             auto item = Gio::MenuItem::create(filepath, "");
-            item->set_action_and_target("app.open_recent_doc",
+            item->set_action_and_target("win.open_recent_doc",
                 Glib::Variant<Glib::ustring>::create(filepath));
             _pGioRecentDocsSub4->append_item(item);
             ++idx;
@@ -365,10 +359,8 @@ Gtk::Popover* CtMenu::_build_actions_popover()
         }
         auto* btn = Gtk::manage(new Gtk::Button(action.name));
         btn->set_halign(Gtk::Align::FILL);
-        btn->signal_clicked().connect([&action, pop]{
-            if (action.run_action) {
-                action.run_action();
-            }
+        btn->set_action_name(std::string("win.") + action.id);
+        btn->signal_clicked().connect([pop]{
             pop->popdown();
         });
         vbox->append(*btn);
@@ -387,14 +379,13 @@ void CtMenu::refresh_shortcuts_gtk4()
     auto app = std::dynamic_pointer_cast<Gtk::Application>(Gtk::Application::get_default());
     if (not app) return;
     // Re-apply all accelerators so that any customised shortcuts take effect immediately.
-    // Keyboard shortcuts are registered on the application level and therefore work
-    // whether or not any menu is currently open.
+    // Keyboard shortcuts target the active window and work whether or not a menu is open.
     for (const auto& act : _actions) {
         if (act.id.empty()) continue;
         const std::string& shortcut = act.get_shortcut(_pCtConfig);
         std::vector<Glib::ustring> accels;
         if (not shortcut.empty()) accels.push_back(shortcut);
-        app->set_accels_for_action(std::string("app.") + act.id, accels);
+        app->set_accels_for_action(std::string("win.") + act.id, accels);
     }
 }
 
@@ -572,18 +563,6 @@ CtMenuAction::CtMenuAction()
 #endif
 {}
 
-#if GTKMM_MAJOR_VERSION < 4
-static void on_menu_activate(void* /*pObject*/, CtMenuAction* pAction)
-{
-    if (pAction) {
-        // this allows the menu to close before the action is executed
-        Glib::signal_idle().connect_once([pAction](){
-            pAction->run_action();
-        });
-    }
-}
-#endif /* GTKMM_MAJOR_VERSION < 4 */
-
 const std::string& CtMenuAction::get_shortcut(CtConfig* pCtConfig) const
 {
     const auto it = pCtConfig->customKbShortcuts.find(id);
@@ -611,6 +590,65 @@ CtMenu::CtMenu(CtMainWin* pCtMainWin)
     init_actions(pCtMainWin->get_ct_actions());
 }
 
+void CtMenu::_add_tree_action(CtTreeSelectionSemantics semantics, CtMenuAction action)
+{
+    action.treeSelectionSemantics = semantics;
+    _actions.push_back(std::move(action));
+}
+
+bool CtMenu::is_action_enabled(const CtMenuAction& action, const CtTreeSelectionSnapshot& selection) const
+{
+    return action.treeSelectionSemantics != CtTreeSelectionSemantics::SinglePhysicalRow or
+           not selection.has_multiple_rows();
+}
+
+bool CtMenu::is_action_enabled(const std::string& action_id)
+{
+    CtMenuAction* action = find_action(action_id);
+    return action and is_action_enabled(*action, _pCtMainWin->tree_selection_snapshot());
+}
+
+void CtMenu::activate_action(const std::string& action_id, CtActionDispatchMode mode)
+{
+    if (mode == CtActionDispatchMode::Deferred) {
+        // Let GTK close the menu before opening dialogs or changing focus. The
+        // tracked slot is invalidated automatically if this CtMenu is destroyed.
+        Glib::signal_idle().connect_once(
+            sigc::bind(sigc::mem_fun(*this, &CtMenu::_activate_action_immediate), action_id));
+        return;
+    }
+    _activate_action_immediate(action_id);
+}
+
+void CtMenu::_activate_action_immediate(const std::string& action_id)
+{
+    CtMenuAction* action = find_action(action_id);
+    if (action and is_action_enabled(*action, _pCtMainWin->tree_selection_snapshot()) and action->run_action) {
+        action->run_action();
+    }
+}
+
+void CtMenu::refresh_action_sensitivity()
+{
+    const CtTreeSelectionSnapshot selection = _pCtMainWin->tree_selection_snapshot();
+    for (CtMenuAction& action : _actions) {
+        if (action.treeSelectionSemantics == CtTreeSelectionSemantics::NotTreeAction) continue;
+        const bool enabled = is_action_enabled(action, selection);
+#if GTKMM_MAJOR_VERSION >= 4
+        if (action.signal_set_sensitive) action.signal_set_sensitive(enabled);
+#else
+        if (action.signal_set_sensitive) action.signal_set_sensitive->emit(enabled);
+#endif
+#if GTKMM_MAJOR_VERSION >= 4
+        if (auto simple_action = std::dynamic_pointer_cast<Gio::SimpleAction>(_pCtMainWin->lookup_action(action.id))) {
+#else
+        if (auto simple_action = Glib::RefPtr<Gio::SimpleAction>::cast_dynamic(_pCtMainWin->lookup_action(action.id))) {
+#endif
+            simple_action->set_enabled(enabled);
+        }
+    }
+}
+
 #if GTKMM_MAJOR_VERSION < 4 && !defined(GTKMM_DISABLE_DEPRECATED)
 /*static*/Gtk::MenuItem* CtMenu::create_menu_item(Gtk::Menu* pMenu, const char* name, const char* image, const char* desc)
 {
@@ -620,7 +658,6 @@ CtMenu::CtMenu(CtMainWin* pCtMainWin)
                                nullptr,
                                Glib::RefPtr<Gtk::AccelGroup>{},
                                desc,
-                               nullptr,
                                nullptr,
                                nullptr);
 }
@@ -713,7 +750,6 @@ Gtk::Menu* CtMenu::build_bookmarks_menu(std::list<std::tuple<gint64, Glib::ustri
                                                        _pAccelGroup,
                                                        _pCtConfig->menusTooltips ? node_name.c_str() : nullptr,
                                                        nullptr,
-                                                       nullptr,
                                                        nullptr);
         pMenuItem->signal_activate().connect(sigc::bind(bookmark_action, node_id));
     }
@@ -738,7 +774,6 @@ Gtk::Menu* CtMenu::build_recent_docs_menu(const CtRecentDocsFilepaths& recentDoc
                                                        nullptr,
                                                        nullptr,
                                                        nullptr,
-                                                       nullptr,
                                                        false/*use_underline*/);
         pMenuItem->signal_activate().connect(sigc::bind(recent_doc_open_action, filepath.string()));
     }
@@ -748,7 +783,6 @@ Gtk::Menu* CtMenu::build_recent_docs_menu(const CtRecentDocsFilepaths& recentDoc
                                                      nullptr,
                                                      _pAccelGroup,
                                                      _pCtConfig->menusTooltips ? _("Remove from list") : nullptr,
-                                                     nullptr,
                                                      nullptr,
                                                      nullptr);
     Gtk::Menu* pMenuRm = Gtk::manage(new Gtk::Menu());
@@ -761,7 +795,6 @@ Gtk::Menu* CtMenu::build_recent_docs_menu(const CtRecentDocsFilepaths& recentDoc
                                                        nullptr,
                                                        _pAccelGroup,
                                                        _pCtConfig->menusTooltips ? filepath.c_str() : nullptr,
-                                                       nullptr,
                                                        nullptr,
                                                        nullptr);
         pMenuItem->signal_activate().connect(sigc::bind(recent_doc_rm_action, filepath.string()));
@@ -953,10 +986,13 @@ Gtk::MenuItem* CtMenu::_add_menu_item(Gtk::MenuShell* pMenuShell,
                                                    shortcut.c_str(),
                                                    _pAccelGroup,
                                                    _pCtConfig->menusTooltips ? pAction->desc.c_str() : nullptr,
-                                                   (gpointer)pAction,
                                                    pAction->signal_set_sensitive.get(),
                                                    pAction->signal_set_visible.get(),
                                                    pListConnections);
+    pMenuItem->signal_activate().connect(
+        sigc::bind(sigc::mem_fun(*this, &CtMenu::activate_action),
+                   pAction->id,
+                   CtActionDispatchMode::Deferred));
     pMenuItem->get_child()->set_name(pAction->id); // for find_menu_item();
     return pMenuItem;
 }
@@ -968,7 +1004,6 @@ Gtk::MenuItem* CtMenu::_add_menu_item(Gtk::MenuShell* pMenuShell,
                                                      const char* shortcut,
                                                      Glib::RefPtr<Gtk::AccelGroup> accelGroup,
                                                      const char* desc,
-                                                     gpointer action_data,
                                                      sigc::signal<void, bool>* signal_set_sensitive,
                                                      sigc::signal<void, bool>* signal_set_visible,
                                                      std::list<sigc::connection>* pListConnections/*= nullptr*/,
@@ -992,27 +1027,18 @@ Gtk::MenuItem* CtMenu::_add_menu_item(Gtk::MenuShell* pMenuShell,
 
     if (signal_set_sensitive) {
         sigc::connection conn = signal_set_sensitive->connect(
-            sigc::bind<0>(
-                sigc::ptr_fun(&gtk_widget_set_sensitive),
-                GTK_WIDGET(pMenuItem->gobj())));
+            sigc::mem_fun(*pMenuItem, &Gtk::Widget::set_sensitive));
         if (pListConnections) {
             pListConnections->push_back(std::move(conn));
         }
     }
     if (signal_set_visible) {
         sigc::connection conn = signal_set_visible->connect(
-            sigc::bind<0>(
-                sigc::ptr_fun(&gtk_widget_set_visible),
-                GTK_WIDGET(pMenuItem->gobj())));
+            sigc::mem_fun(*pMenuItem, &Gtk::Widget::set_visible));
         if (pListConnections) {
             pListConnections->push_back(std::move(conn));
         }
     }
-    if (action_data) {
-        gtk_widget_set_events(GTK_WIDGET(pMenuItem->gobj()), GDK_KEY_PRESS_MASK);
-        g_signal_connect(G_OBJECT(pMenuItem->gobj()), "activate", G_CALLBACK(on_menu_activate), action_data);
-    }
-
     pMenuItem->show_all();
     pMenuShell->append(*pMenuItem);
 
@@ -1094,4 +1120,3 @@ Gtk::SeparatorMenuItem* CtMenu::_add_menu_separator(Gtk::MenuShell* pMenuShell)
     return pSeparatorItem;
 }
 #endif /* GTKMM_MAJOR_VERSION < 4 && !defined(GTKMM_DISABLE_DEPRECATED) */
-

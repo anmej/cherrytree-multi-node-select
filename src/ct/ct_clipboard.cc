@@ -283,12 +283,24 @@ void CtClipboard::table_column_paste(CtTableCommon* pTable)
 #endif
 }
 
-void CtClipboard::node_link_to_clipboard(CtTreeIter node)
+void CtClipboard::node_links_to_clipboard(const std::vector<CtTreeIter>& nodes)
 {
+    if (nodes.empty()) return;
     CtClipboardData* clip_data = new CtClipboardData{};
-    std::string tml = R"XML(<?xml version="1.0" encoding="UTF-8"?><root><slot><rich_text link="node {}">{}</rich_text></slot></root>)XML";
-    clip_data->rich_text = fmt::format(fmt::runtime(tml), node.get_node_id(), str::xml_escape(node.get_node_name()));
-    clip_data->plain_text = fmt::format("{} - {}", node.get_cherrytree_filepath(), CtMiscUtil::get_node_hierarchical_name(node, " / ", false/*for_filename*/).c_str());
+    clip_data->rich_text = R"XML(<?xml version="1.0" encoding="UTF-8"?><root><slot>)XML";
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        if (i > 0) {
+            clip_data->rich_text += "<rich_text>\n</rich_text>";
+            clip_data->plain_text += "\n";
+        }
+        clip_data->rich_text += fmt::format(
+            R"XML(<rich_text link="node {}">{}</rich_text>)XML",
+            nodes[i].get_node_id(), str::xml_escape(nodes[i].get_node_name()));
+        clip_data->plain_text += fmt::format(
+            "{} - {}", nodes[i].get_cherrytree_filepath(),
+            CtMiscUtil::get_node_hierarchical_name(nodes[i], " / ", false/*for_filename*/).c_str());
+    }
+    clip_data->rich_text += "</slot></root>";
 
     _set_clipboard_data({CtConst::TARGET_CTD_RICH_TEXT, CtConst::TARGET_CTD_PLAIN_TEXT}, clip_data);
 }

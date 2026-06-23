@@ -121,6 +121,8 @@ The implementation is split by responsibility:
 - `src/ct/ct_treestore.cc`: binding real node buffers and embedded widgets to
   each editor view
 - `tests/tests_multi_node.cpp`: focused integration and stress coverage
+- `tests/tests_tree_multi_selection.cpp`: tree-action and structural mutation
+  coverage
 
 See `MULTI_NODE_EDITOR.md` for the full design and data flow.
 
@@ -134,7 +136,13 @@ Important invariants:
   tree cursor.
 - `curr_tree_iter()` and `get_text_view()` represent the focused editor;
   `tree_cursor_iter()` represents the structural tree target;
-  `selected_tree_iters()` returns unique data holders in tree order.
+  `selected_tree_iters()` returns unique data holders, while
+  `selected_tree_row_iters()` preserves physical rows. Capture both through
+  `tree_selection_snapshot()` when dispatching tree actions.
+- Route tree actions through `CtMenu::activate_action()` so declared selection
+  semantics guard menus, toolbars, shortcuts, Gio actions, and key handlers.
+- Structural deletion plans retain stable node IDs, not tree iterators, across
+  confirmation; use `TreeModelBatchGuard` for model mutations.
 - `_pActiveTextview` must never point to a temporary view during or after
   multi-editor teardown.
 - Disconnect section focus, buffer, and tree-store signal connections before
@@ -155,9 +163,11 @@ Important invariants:
   unbounded vertical GtkTextView layout; it can violate GTK text-tree layout
   invariants on large documents.
 
-When modifying this area, extend the stress coverage in
-`tests/tests_multi_node.cpp`. The scenarios are invoked from the existing
-read/write application lifecycle in `tests/tests_read_write.cpp`. Exercise
+When modifying this area, extend editor lifecycle coverage in
+`tests/tests_multi_node.cpp` and tree-action coverage in
+`tests/tests_tree_multi_selection.cpp`. The scenarios are invoked from the
+existing read/write application lifecycle in `tests/tests_read_write.cpp`.
+Exercise
 repeated section focus, tree focus, single-selection teardown, multi-selection
 rebuilds, shared-node deduplication, paging, and large-document scrollers.
 

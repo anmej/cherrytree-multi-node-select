@@ -36,6 +36,18 @@
 class CtConfig;
 class CtActions;
 class CtMainWin;
+struct CtTreeSelectionSnapshot;
+
+enum class CtTreeSelectionSemantics {
+    NotTreeAction,
+    SinglePhysicalRow,
+    BatchPhysicalRows,
+    NavigationToSingleRow,
+    SelectionIndependent,
+    PreserveSelectionAndRefreshOrder
+};
+
+enum class CtActionDispatchMode { Immediate, Deferred };
 
 struct CtMenuAction
 {
@@ -45,8 +57,13 @@ struct CtMenuAction
     std::string name;
     std::string built_in_shortcut;
     std::string desc;
+    CtTreeSelectionSemantics treeSelectionSemantics{CtTreeSelectionSemantics::NotTreeAction};
+
+private:
+    friend class CtMenu;
     std::function<void()> run_action;
 
+public:
     // Sensitivity/visibility update hooks
 #if GTKMM_MAJOR_VERSION >= 4
     std::function<void(bool)> signal_set_sensitive;
@@ -84,7 +101,7 @@ struct CtMenuAction
     bool is_shortcut_overridden(CtConfig* pCtConfig) const;
 };
 
-class CtMenu
+class CtMenu : public sigc::trackable
 {
 public:
     CtMenu(CtMainWin* pCtMainWin);
@@ -105,6 +122,10 @@ public:
 
 public:
     void init_actions(CtActions* pActions);
+    void refresh_action_sensitivity();
+    bool is_action_enabled(const std::string& action_id);
+    bool is_action_enabled(const CtMenuAction& action, const CtTreeSelectionSnapshot& selection) const;
+    void activate_action(const std::string& action_id, CtActionDispatchMode mode = CtActionDispatchMode::Immediate);
 
     CtMenuAction*  find_action(const std::string& id);
     const std::list<CtMenuAction>& get_actions() { return _actions; }
@@ -155,6 +176,8 @@ private:
     void                       build_popup_menu_table_cell(Gtk::Menu* pMenu, const bool first_row, const bool first_col, const bool last_row, const bool last_col);
 
 private:
+    void                    _add_tree_action(CtTreeSelectionSemantics semantics, CtMenuAction action);
+    void                    _activate_action_immediate(const std::string& action_id);
 #if GTKMM_MAJOR_VERSION < 4 && !defined(GTKMM_DISABLE_DEPRECATED)
     void                    _walk_menu_xml(Gtk::MenuShell* pMenuShell, const char* document, const char* xpath);
     void                    _walk_menu_xml(Gtk::MenuShell* pMenuShell, xmlpp::Node* pNode);
@@ -168,7 +191,6 @@ private:
                                                 const char* shortcut,
                                                 Glib::RefPtr<Gtk::AccelGroup> accelGroup,
                                                 const char* desc,
-                                                gpointer action_data,
                                                 sigc::signal<void, bool>* signal_set_sensitive,
                                                 sigc::signal<void, bool>* signal_set_visible,
                                                 std::list<sigc::connection>* pListConnections = nullptr,

@@ -109,6 +109,7 @@ void assert_selection_order_and_shared_deduplication(CtMainWin* pWin,
 
     const auto selected_with_alias = pWin->selected_tree_iters();
     ASSERT_EQ(2u, selected_with_alias.size());
+    EXPECT_EQ(3u, pWin->selected_tree_row_iters().size());
     EXPECT_EQ(selected[0].get_node_id_data_holder(), selected_with_alias[0].get_node_id_data_holder());
     EXPECT_EQ(selected[1].get_node_id_data_holder(), selected_with_alias[1].get_node_id_data_holder());
 
@@ -290,6 +291,7 @@ void assert_multi_node_selection(CtMainWin* pWin)
 
     select_primary_nodes(pWin, first, second);
     assert_selection_order_and_shared_deduplication(pWin, first, second);
+    assert_tree_multi_selection_actions(pWin);
     assert_focused_editor_and_tree_targeting(pWin, second);
     assert_editor_preferences(pWin);
     assert_repeated_focus_rebuild_and_teardown(pWin, second);
@@ -299,9 +301,13 @@ void assert_multi_node_selection(CtMainWin* pWin)
         large_selection_stress_done = true;
         assert_large_documents_use_inner_scrollers(pWin);
         assert_large_selection_is_paged(pWin);
+        assert_tree_batch_delete(pWin);
     }
 
-    pWin->get_tree_view().set_cursor_safe(first);
+    pWin->select_tree_iter_only(pWin->get_tree_store().to_ct_tree_iter(first));
+    process_gtk_events();
+    ASSERT_EQ(1u, pWin->selected_tree_row_iters().size());
+    EXPECT_TRUE(pWin->get_ct_menu().is_action_enabled("tree_add_node"));
     process_gtk_events();
     pWin->get_ct_config()->showLineNumbers = show_line_numbers;
     pWin->set_show_line_numbers(show_line_numbers);

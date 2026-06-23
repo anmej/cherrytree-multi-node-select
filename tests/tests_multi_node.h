@@ -11,3 +11,7 @@
 class CtMainWin;
 
 void assert_multi_node_selection(CtMainWin* pWin);
+void assert_tree_multi_selection_actions(CtMainWin* pWin);
+void assert_tree_batch_delete(CtMainWin* pWin);
+void assert_empty_tree_batch_delete(CtMainWin* pWin);
+void queue_deferred_menu_action_for_teardown(CtMainWin* pWin);

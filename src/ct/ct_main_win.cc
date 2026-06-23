@@ -8,44 +8,42 @@ void CtMainWin::init_app_actions_gtk4()
 
     // Register all actions so that:
     //  1. Keyboard shortcuts work globally (never need the menu to be open).
-    //  2. The Gio::Menu / PopoverMenuBar can activate them via "app.<id>".
+    //  2. The Gio::Menu / PopoverMenuBar can activate them via "win.<id>".
     for (const auto& act : _uCtMenu->get_actions()) {
         if (act.id.empty()) continue;
 
-        if (not app->lookup_action(act.id)) {
+        if (not lookup_action(act.id)) {
             auto simple = Gio::SimpleAction::create(act.id);
             simple->signal_activate().connect([this, action_id = act.id](const Glib::VariantBase&){
-                if (auto a = _uCtMenu->find_action(action_id)) {
-                    if (a->run_action) a->run_action();
-                }
+                _uCtMenu->activate_action(action_id);
             });
-            app->add_action(simple);
+            add_action(simple);
         }
 
         // (Re-)apply accelerator – this works even before the menu is opened.
         const std::string& shortcut = act.get_shortcut(_pCtConfig);
         std::vector<Glib::ustring> accels;
         if (not shortcut.empty()) accels.push_back(shortcut);
-        app->set_accels_for_action(std::string("app.") + act.id, accels);
+        app->set_accels_for_action(std::string("win.") + act.id, accels);
     }
 
     // Parameterised action: navigate to a bookmarked node.
-    // Used by Gio::Menu bookmark entries (app.goto_bookmark(<node_id>)).
-    if (not app->lookup_action("goto_bookmark")) {
+    // Used by Gio::Menu bookmark entries (win.goto_bookmark(<node_id>)).
+    if (not lookup_action("goto_bookmark")) {
         auto goto_bm = Gio::SimpleAction::create(
             "goto_bookmark", Glib::VARIANT_TYPE_INT64);
         goto_bm->signal_activate().connect([this](const Glib::VariantBase& param){
             const gint64 node_id =
                 Glib::VariantBase::cast_dynamic<Glib::Variant<gint64>>(param).get();
             CtTreeIter tree_iter = get_tree_store().get_node_from_node_id(node_id);
-            if (tree_iter) _uCtTreeview->set_cursor_safe(tree_iter);
+            if (tree_iter) select_tree_iter_only(tree_iter);
         });
-        app->add_action(goto_bm);
+        add_action(goto_bm);
     }
 
     // Parameterised action: open a recent document.
-    // Used by Gio::Menu recent-docs entries (app.open_recent_doc(<filepath>)).
-    if (not app->lookup_action("open_recent_doc")) {
+    // Used by Gio::Menu recent-docs entries (win.open_recent_doc(<filepath>)).
+    if (not lookup_action("open_recent_doc")) {
         auto open_recent = Gio::SimpleAction::create(
             "open_recent_doc", Glib::VARIANT_TYPE_STRING);
         open_recent->signal_activate().connect([this](const Glib::VariantBase& param){
@@ -53,7 +51,7 @@ void CtMainWin::init_app_actions_gtk4()
                 Glib::VariantBase::cast_dynamic<Glib::Variant<Glib::ustring>>(param).get();
             file_open(std::string(filepath), "", "", "", true);
         });
-        app->add_action(open_recent);
+        add_action(open_recent);
     }
 }
 #endif /* GTKMM_MAJOR_VERSION >= 4 */
@@ -645,6 +643,7 @@ void CtMainWin::_reset_CtTreestore_CtTreeview()
 
     _tree_just_auto_expanded = false;
     _uCtTreeview->get_selection()->signal_changed().connect(sigc::mem_fun(*this, &CtMainWin::_on_treeview_selection_changed));
+    _uCtMenu->refresh_action_sensitivity();
     #if GTKMM_MAJOR_VERSION < 4
     _uCtTreeview->signal_button_release_event().connect(sigc::mem_fun(*this, &CtMainWin::_on_treeview_button_release_event));
     _uCtTreeview->signal_event_after().connect(sigc::mem_fun(*this, &CtMainWin::_on_treeview_event_after));
@@ -655,6 +654,8 @@ void CtMainWin::_reset_CtTreestore_CtTreeview()
     _uCtTreeview->signal_key_press_event().connect(sigc::mem_fun(*this, &CtMainWin::_on_treeview_key_press_event), false);
     _uCtTreeview->signal_scroll_event().connect(sigc::mem_fun(*this, &CtMainWin::_on_treeview_scroll_event));
     _uCtTreeview->signal_popup_menu().connect(sigc::mem_fun(*this, &CtMainWin::_on_treeview_popup_menu));
+    #else
+    _setup_treeview_key_controller_gtk4();
     #endif
 
     #if GTKMM_MAJOR_VERSION < 4 && !defined(GTKMM_DISABLE_DEPRECATED)
@@ -969,6 +970,24 @@ void CtMainWin::window_header_update()
     if (_no_gui) return;
 
     CtTreeIter currTreeIter = curr_tree_iter();
+    if (not currTreeIter) {
+        _ctWinHeader.nameLabel.set_markup("");
+        _ctWinHeader.nodeIcon.set_visible(false);
+        _ctWinHeader.lockIcon.set_visible(false);
+        _ctWinHeader.bookmarkIcon.set_visible(false);
+        _ctWinHeader.ghostIcon.set_visible(false);
+        _ctWinHeader.button_to_node_id.clear();
+#if GTKMM_MAJOR_VERSION >= 4
+        for (auto pChild = _ctWinHeader.buttonBox.get_first_child(); pChild; pChild = pChild->get_next_sibling()) {
+            pChild->hide();
+        }
+#else
+        for (auto pChild : _ctWinHeader.buttonBox.get_children()) {
+            pChild->hide();
+        }
+#endif
+        return;
+    }
 
     std::string name = _pCtConfig->nodeNameHeaderShowFullPath ?
         CtMiscUtil::get_node_hierarchical_name(currTreeIter, " / ", false).c_str() : currTreeIter.get_node_name().c_str();
@@ -1252,7 +1271,7 @@ void CtMainWin::menu_set_bookmark_menu_items()
     sigc::slot<void, gint64> bookmark_action = [&](gint64 node_id) {
         CtTreeIter tree_iter = _uCtTreestore->get_node_from_node_id(node_id);
         if (tree_iter) {
-            _uCtTreeview->set_cursor_safe(tree_iter);
+            select_tree_iter_only(tree_iter);
         }
     };
     for (unsigned i = 0; i < _pBookmarksSubmenus.size(); ++i) {

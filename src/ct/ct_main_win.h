@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <optional>
+#include <utility>
 
 #include <glibmm/i18n.h>
 #include <memory>
@@ -88,9 +89,44 @@ class CtMenu;
 class CtPrint;
 class CtStorageControl;
 
+struct CtTreeSelectionSnapshot
+{
+    CtTreeIter cursor;
+    std::vector<CtTreeIter> physicalRows;
+    std::vector<CtTreeIter> logicalDataHolders;
+
+    bool has_multiple_rows() const { return physicalRows.size() > 1u; }
+    std::vector<CtTreeIter> physical_or_cursor() const
+    {
+        return physicalRows.empty() and cursor ? std::vector<CtTreeIter>{cursor} : physicalRows;
+    }
+    std::vector<CtTreeIter> logical_or_cursor() const
+    {
+        return logicalDataHolders.empty() and cursor ? std::vector<CtTreeIter>{cursor} : logicalDataHolders;
+    }
+};
+
 class CtMainWin : public Gtk::ApplicationWindow
 {
 public:
+    enum class TreeModelBatchMode { PreserveEditorBindings, DetachEditorBindings };
+
+    class TreeModelBatchGuard
+    {
+    public:
+        TreeModelBatchGuard() = default;
+        TreeModelBatchGuard(const TreeModelBatchGuard&) = delete;
+        TreeModelBatchGuard& operator=(const TreeModelBatchGuard&) = delete;
+        TreeModelBatchGuard(TreeModelBatchGuard&& other) noexcept;
+        TreeModelBatchGuard& operator=(TreeModelBatchGuard&& other) noexcept;
+        ~TreeModelBatchGuard();
+
+    private:
+        friend class CtMainWin;
+        TreeModelBatchGuard(CtMainWin* pCtMainWin, TreeModelBatchMode mode);
+        CtMainWin* _pCtMainWin{nullptr};
+    };
+
     CtMainWin(
         bool                     no_gui,
         CtConfig*                pCtConfig,
@@ -148,6 +184,11 @@ public:
     CtTreeIter                        tree_cursor_iter();
     // Selected data holders in tree order, with shared nodes returned once.
     std::vector<CtTreeIter>           selected_tree_iters();
+    // Selected physical tree rows in tree order, including shared aliases.
+    std::vector<CtTreeIter>           selected_tree_row_iters();
+    CtTreeSelectionSnapshot           tree_selection_snapshot();
+    void                              select_tree_iter_only(CtTreeIter tree_iter);
+    [[nodiscard]] TreeModelBatchGuard tree_model_batch_guard(TreeModelBatchMode mode = TreeModelBatchMode::PreserveEditorBindings);
     CtTreeStore&                      get_tree_store()  { return *_uCtTreestore; }
     CtTreeView&                       get_tree_view()   { return *_uCtTreeview; }
     CtTextView&                       get_text_view()   { return *_pActiveTextview; }
@@ -192,6 +233,10 @@ public:
     void                      apply_tag_try_automatic_bounds_paragraph(Glib::RefPtr<Gtk::TextBuffer> text_buffer, Gtk::TextIter iter_start);
 
 private:
+    void _tree_model_batch_enter(TreeModelBatchMode mode);
+    void _tree_model_batch_exit();
+    void _detach_tree_editor_for_model_change();
+
     Gtk::Box&      _init_status_bar();
     Gtk::EventBox& _init_window_header();
 
@@ -301,6 +346,10 @@ private:
     bool _on_treeview_key_press_event(GdkEventKey* event);
     bool _on_treeview_popup_menu();
     bool _on_treeview_scroll_event(GdkEventScroll* event);
+#else
+    void _setup_treeview_key_controller_gtk4();
+    bool _on_treeview_key_pressed_gtk4(guint keyval, guint keycode, Gdk::ModifierType state);
+    Glib::RefPtr<Gtk::EventControllerKey> _treeKeyController4;
 #endif
     #if GTKMM_MAJOR_VERSION < 4 && !defined(GTKMM_DISABLE_DEPRECATED)
     bool _on_treeview_drag_motion(const Glib::RefPtr<Gdk::DragContext>& context,
@@ -423,6 +472,7 @@ private:
     std::vector<std::unique_ptr<CtMultiNodeSection>> _multiNodeSections;
     bool                         _multiNodeMode{false};
     bool                         _multiNodeEditorRebuilding{false};
+    unsigned                     _multiNodeEditorRebuildDepth{0};
     guint64                      _multiNodeEditorGeneration{0};
     size_t                       _multiNodePageStart{0};
     bool                         _multiNodePageBarVisible{false};

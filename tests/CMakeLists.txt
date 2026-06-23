@@ -85,6 +85,7 @@ package_add_test(run_tests_with_x_1
 package_add_test(run_tests_with_x_2
   tests_main.cpp
   tests_multi_node.cpp
+  tests_tree_multi_selection.cpp
   tests_read_write.cpp
   ../src/ct/icons.gresource.cc
 )

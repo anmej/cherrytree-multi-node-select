@@ -30,6 +30,7 @@
 #include "ct_logging.h"
 #include <ctime>
 #include <gtkmm/dialog.h>
+#include <unordered_set>
 
 bool CtActions::_is_there_selected_node_or_error()
 {
@@ -335,7 +336,7 @@ Gtk::TreeModel::iterator CtActions::_node_add_with_data(Gtk::TreeModel::iterator
     nodeCtIter.pending_new_db_node();
     ct_treestore.nodes_sequences_fix(nodeIter->parent(), false);
     ct_treestore.update_node_aux_icon(nodeCtIter);
-    _pCtMainWin->get_tree_view().set_cursor_safe(nodeIter);
+    _pCtMainWin->select_tree_iter_only(nodeCtIter);
     _pCtMainWin->get_text_view().mm().grab_focus();
     return nodeIter;
 }
@@ -351,7 +352,7 @@ Gtk::TreeModel::iterator CtActions::node_child_exist_or_create(Gtk::TreeModel::i
     for (; childIter; ++childIter) {
         if (_pCtMainWin->get_tree_store().to_ct_tree_iter(childIter).get_node_name() == Glib::ustring(nodeName)) {
             if (focusIfExisting) {
-                _pCtMainWin->get_tree_view().set_cursor_safe(childIter);
+                _pCtMainWin->select_tree_iter_only(_pCtMainWin->get_tree_store().to_ct_tree_iter(childIter));
             }
             return childIter;
         }
@@ -584,67 +585,108 @@ void CtActions::node_inherit_syntax()
     _pCtMainWin->update_window_save_needed();
 }
 
-void CtActions::node_delete()
+CtTreeDeletePlan CtActions::build_tree_delete_plan(const CtTreeSelectionSnapshot& selection)
 {
-    if (_in_action) { spdlog::debug("?? 2*{}", __FUNCTION__); return; }
-    _in_action = true;
-    auto on_scope_exit = scope_guard([this](void*) { _in_action = false; });
+    CtTreeStore& ctTreeStore = _pCtMainWin->get_tree_store();
+    CtTreeDeletePlan plan;
 
-    if (not _is_there_selected_node_or_error()) return;
-    CtTreeIter tree_iter = _tree_cursor_iter();
-    if (tree_iter.get_node_read_only()) {
-        CtDialogs::error_dialog(_("The Selected Node is Read Only."), *_pCtMainWin);
-        return;
+    std::vector<CtTreeIter> deletion_roots;
+    std::vector<Gtk::TreeModel::Path> root_paths;
+    for (CtTreeIter tree_iter : selection.physical_or_cursor()) {
+        const Gtk::TreeModel::Path path = ctTreeStore.get_path(tree_iter);
+        const bool covered_by_selected_ancestor = std::any_of(root_paths.begin(), root_paths.end(), [&](const auto& root_path){
+            return path.is_descendant(root_path);
+        });
+        if (not covered_by_selected_ancestor) {
+            deletion_roots.push_back(tree_iter);
+            plan.rootNodeIds.push_back(tree_iter.get_node_id());
+            root_paths.push_back(path);
+        }
+    }
+    if (deletion_roots.empty()) return plan;
+
+    plan.hasReadOnlyRoot = std::any_of(
+        deletion_roots.begin(), deletion_roots.end(), [](CtTreeIter tree_iter){ return tree_iter.get_node_read_only(); });
+
+    std::list<std::string> lstNodesWarn;
+    std::function<void(Gtk::TreeModel::iterator, int)> collect_ids_to_remove;
+    collect_ids_to_remove = [this, &ctTreeStore, &plan, &lstNodesWarn, &collect_ids_to_remove]
+                            (Gtk::TreeModel::iterator iter, const int level) {
+        CtTreeIter tree_iter = ctTreeStore.to_ct_tree_iter(iter);
+        plan.removalNodeIds.push_back(tree_iter.get_node_id());
+        plan.removalNodeIdSet.insert(tree_iter.get_node_id());
+        if (lstNodesWarn.size() <= 15) {
+            lstNodesWarn.push_back(CtConst::CHAR_NEWLINE + str::repeat(CtConst::CHAR_SPACE, level*3) +
+                                   _pCtConfig->charsListbul[0] + CtConst::CHAR_SPACE + tree_iter.get_node_name());
+        }
+        else if (lstNodesWarn.size() == 16) {
+            lstNodesWarn.push_back(CtConst::CHAR_NEWLINE + "...");
+        }
+#if GTKMM_MAJOR_VERSION >= 4
+        for (auto child_iter = iter->children().begin(); child_iter; ++child_iter) {
+            collect_ids_to_remove(child_iter, level + 1);
+        }
+#else
+        for (Gtk::TreeModel::iterator child : iter->children()) {
+            collect_ids_to_remove(child, level + 1);
+        }
+#endif
+    };
+    for (CtTreeIter root : deletion_roots) collect_ids_to_remove(root, 0);
+
+    if (deletion_roots.size() == 1u) {
+        plan.confirmationText = str::format(_("Are you sure to <b>Delete the node '%s'?</b>"),
+                                            str::xml_escape(deletion_roots.front().get_node_name()));
+    }
+    else {
+        plan.confirmationText = str::format(_("Are you sure to <b>Delete the selected %s nodes?</b>"),
+                                            std::to_string(deletion_roots.size()));
+    }
+    if (plan.removalNodeIds.size() > deletion_roots.size()) {
+        plan.confirmationText += str::repeat(CtConst::CHAR_NEWLINE, 2) + _("The selected nodes <b>have Children, they will be Deleted too!</b>");
+        plan.confirmationText += str::xml_escape(str::join(lstNodesWarn, ""));
     }
 
-    CtTreeStore& ctTreeStore = _pCtMainWin->get_tree_store();
-    std::function<void(Gtk::TreeModel::iterator, int)> f_collect_ids_to_rm;
-    std::list<gint64> nodeIdsToRemove;
-    std::list<std::string> lstNodesWarn;
-    f_collect_ids_to_rm = [this, &ctTreeStore, &nodeIdsToRemove, &lstNodesWarn, &f_collect_ids_to_rm](Gtk::TreeModel::iterator iter,
-                                                                                                      const int level) {
-        CtTreeIter ctTreeIter = ctTreeStore.to_ct_tree_iter(iter);
-        nodeIdsToRemove.push_back(ctTreeIter.get_node_id());
-        if (lstNodesWarn.size() > 15) {
-            if (lstNodesWarn.size() == 16) {
-                lstNodesWarn.push_back(CtConst::CHAR_NEWLINE + "...");
+    std::vector<gint64> all_node_ids;
+    ctTreeStore.get_store()->foreach_iter([&](const Gtk::TreeModel::iterator& iter){
+        all_node_ids.push_back(ctTreeStore.to_ct_tree_iter(iter).get_node_id());
+        return false;
+    });
+    const gint64 cursor_node_id = selection.cursor ? selection.cursor.get_node_id() : -1;
+    if (not plan.removalNodeIdSet.count(cursor_node_id)) {
+        plan.fallbackNodeId = cursor_node_id;
+    }
+    else if (auto cursor_pos = std::find(all_node_ids.begin(), all_node_ids.end(), cursor_node_id); cursor_pos != all_node_ids.end()) {
+        const size_t cursor_index = std::distance(all_node_ids.begin(), cursor_pos);
+        for (size_t distance = 1; distance < all_node_ids.size(); ++distance) {
+            if (distance <= cursor_index and not plan.removalNodeIdSet.count(all_node_ids[cursor_index - distance])) {
+                plan.fallbackNodeId = all_node_ids[cursor_index - distance];
+                break;
+            }
+            if (cursor_index + distance < all_node_ids.size() and
+                not plan.removalNodeIdSet.count(all_node_ids[cursor_index + distance])) {
+                plan.fallbackNodeId = all_node_ids[cursor_index + distance];
+                break;
             }
         }
-        else {
-            lstNodesWarn.push_back(CtConst::CHAR_NEWLINE + str::repeat(CtConst::CHAR_SPACE, level*3) + _pCtConfig->charsListbul[0] + CtConst::CHAR_SPACE + ctTreeIter.get_node_name());
-        }
-        #if GTKMM_MAJOR_VERSION >= 4
-        for (auto child_iter = iter->children().begin(); child_iter; ++child_iter) {
-            f_collect_ids_to_rm(child_iter, level + 1);
-        }
-        #else
-        for (Gtk::TreeModel::iterator child : iter->children()) {
-            f_collect_ids_to_rm(child, level + 1);
-        }
-        #endif
-    };
-    f_collect_ids_to_rm(tree_iter, 0);
-
-    Glib::ustring warning_label = str::format(_("Are you sure to <b>Delete the node '%s'?</b>"), str::xml_escape(tree_iter.get_node_name()));
-    if (nodeIdsToRemove.size() > 1u) {
-        warning_label += str::repeat(CtConst::CHAR_NEWLINE, 2) + _("The node <b>has Children, they will be Deleted too!</b>");
-        warning_label += str::xml_escape(str::join(lstNodesWarn, ""));
     }
-    if (not CtDialogs::question_dialog(warning_label, *_pCtMainWin)) {
-        return;
-    }
+    return plan;
+}
 
+void CtActions::_repair_shared_nodes_before_delete(const CtTreeDeletePlan& plan)
+{
+    CtTreeStore& ctTreeStore = _pCtMainWin->get_tree_store();
     // if we delete a shared node master and not all the other members of the group,
     // then we need to move the data to a remaining member of the group
     CtSharedNodesMap shared_nodes_map;
     if (ctTreeStore.populate_shared_nodes_map(shared_nodes_map) > 0u) {
         for (const auto& currPair : shared_nodes_map) {
-            if (vec::exists(nodeIdsToRemove, currPair.first)) {
+            if (plan.removalNodeIdSet.count(currPair.first)) {
                 // we are removing a master, look for a non master in the group not being deleted
                 CtTreeIter oldMasterTreeIter = ctTreeStore.get_node_from_node_id(currPair.first);
                 if (oldMasterTreeIter) {
                     for (const gint64 new_master_id : currPair.second) {
-                        if (not vec::exists(nodeIdsToRemove, new_master_id)) {
+                        if (not plan.removalNodeIdSet.count(new_master_id)) {
                             // found a non master in the group that is not being deleted
                             CtTreeIter newMasterTreeIter = ctTreeStore.get_node_from_node_id(new_master_id);
                             if (newMasterTreeIter) {
@@ -659,7 +701,7 @@ void CtActions::node_delete()
                                 newMasterTreeIter.pending_edit_db_node_hier(); // master id is in the hierarchy table
                                 // update other non masters to point to the new master
                                 for (const gint64 nonMasterId : currPair.second) {
-                                    if (nonMasterId != new_master_id and not vec::exists(nodeIdsToRemove, nonMasterId)) {
+                                    if (nonMasterId != new_master_id and not plan.removalNodeIdSet.count(nonMasterId)) {
                                         CtTreeIter nonMasterTreeIter = ctTreeStore.get_node_from_node_id(nonMasterId);
                                         if (nonMasterTreeIter) {
                                             nonMasterTreeIter.set_node_shared_master_id(new_master_id);
@@ -682,43 +724,71 @@ void CtActions::node_delete()
             }
         }
     }
+}
 
-    // next selected node will be previous sibling or next sibling or parent or None
-    Gtk::TreeModel::iterator new_iter = tree_iter;
-    --new_iter;
-    if (not new_iter) {
-        new_iter = tree_iter;
-        ++new_iter;
-    }
-    if (not new_iter) new_iter = tree_iter.parent();
-
-    _pCtMainWin->resetPrevTreeIter();
-    _pCtMainWin->update_window_save_needed(CtSaveNeededUpdType::ndel);
-
-    Gtk::TreeModel::iterator erase_iter = tree_iter;
-
-    if (new_iter) {
-        _pCtMainWin->get_tree_view().set_cursor_safe(new_iter);
-        _pCtMainWin->get_text_view().mm().grab_focus();
-    }
-    else {
-        _curr_buffer()->set_text("");
-        _pCtMainWin->window_header_update();
-        _pCtMainWin->update_selected_node_statusbar_info();
-        _pCtMainWin->get_text_view().mm().set_sensitive(false);
+bool CtActions::_apply_tree_delete_plan(const CtTreeDeletePlan& plan)
+{
+    CtTreeStore& ctTreeStore = _pCtMainWin->get_tree_store();
+    for (const gint64 root_id : plan.rootNodeIds) {
+        if (not ctTreeStore.get_node_from_node_id(root_id)) {
+            spdlog::error("!! deletion root {} no longer exists", root_id);
+            return false;
+        }
     }
 
-    ctTreeStore.get_store()->erase(erase_iter);
+    _repair_shared_nodes_before_delete(plan);
+    for (const gint64 root_id : plan.rootNodeIds) {
+        CtTreeIter root = ctTreeStore.get_node_from_node_id(root_id);
+        if (not root) return false;
+        _pCtMainWin->update_window_save_needed(CtSaveNeededUpdType::ndel, false, &root);
+    }
+    {
+        auto batch_guard = _pCtMainWin->tree_model_batch_guard(CtMainWin::TreeModelBatchMode::DetachEditorBindings);
+        for (auto id = plan.rootNodeIds.rbegin(); id != plan.rootNodeIds.rend(); ++id) {
+            CtTreeIter root = ctTreeStore.get_node_from_node_id(*id);
+            if (not root) return false;
+            ctTreeStore.get_store()->erase(root);
+        }
+    }
 
     bool anyRemovedBookmarked{false};
-    for (gint64 nodeId : nodeIdsToRemove) {
+    for (gint64 nodeId : plan.removalNodeIds) {
         if (_pCtMainWin->get_tree_store().bookmarks_remove(nodeId)) {
             anyRemovedBookmarked = true;
         }
     }
     if (anyRemovedBookmarked) {
         _pCtMainWin->menu_set_bookmark_menu_items();
-        _pCtMainWin->update_window_save_needed(CtSaveNeededUpdType::book);
+        ctTreeStore.pending_edit_db_bookmarks();
+    }
+
+    if (CtTreeIter fallback_iter = ctTreeStore.get_node_from_node_id(plan.fallbackNodeId)) {
+        _pCtMainWin->select_tree_iter_only(fallback_iter);
+        _pCtMainWin->get_text_view().mm().grab_focus();
+    }
+    else {
+        _pCtMainWin->window_header_update();
+        _pCtMainWin->update_selected_node_statusbar_info();
+        _pCtMainWin->get_text_view().mm().set_sensitive(false);
+    }
+    return true;
+}
+
+void CtActions::node_delete()
+{
+    if (_in_action) { spdlog::debug("?? 2*{}", __FUNCTION__); return; }
+    _in_action = true;
+    auto on_scope_exit = scope_guard([this](void*) { _in_action = false; });
+
+    if (not _is_there_selected_node_or_error()) return;
+    const CtTreeDeletePlan plan = build_tree_delete_plan(_pCtMainWin->tree_selection_snapshot());
+    if (not plan) return;
+    if (plan.hasReadOnlyRoot) {
+        CtDialogs::error_dialog(_("One or More Selected Nodes are Read Only."), *_pCtMainWin);
+        return;
+    }
+    if (CtDialogs::question_dialog(plan.confirmationText, *_pCtMainWin)) {
+        _apply_tree_delete_plan(plan);
     }
 }
 
@@ -729,39 +799,33 @@ void CtActions::node_toggle_read_only()
     auto on_scope_exit = scope_guard([this](void*) { _in_action = false; });
 
     if (not _is_there_selected_node_or_error()) return;
-    CtTreeIter currTreeIter = _tree_cursor_iter();
-    const bool node_is_ro = not currTreeIter.get_node_read_only();
-    currTreeIter.set_node_read_only(node_is_ro);
+    const auto selected = _pCtMainWin->tree_selection_snapshot().logical_or_cursor();
+
+    std::unordered_set<gint64> selected_data_holders;
+    bool make_read_only{false};
+    for (CtTreeIter tree_iter : selected) {
+        selected_data_holders.insert(tree_iter.get_node_id_data_holder());
+        if (not tree_iter.get_node_read_only()) make_read_only = true;
+    }
+
     CtTreeStore& ct_treestore = _pCtMainWin->get_tree_store();
-    ct_treestore.update_node_aux_icon(currTreeIter);
+    for (CtTreeIter tree_iter : selected) {
+        tree_iter.set_node_read_only(make_read_only);
+        tree_iter.pending_edit_db_node_prop();
+    }
+
+    ct_treestore.get_store()->foreach_iter([&](const Gtk::TreeModel::iterator& iter){
+        CtTreeIter tree_iter = ct_treestore.to_ct_tree_iter(iter);
+        if (selected_data_holders.count(tree_iter.get_node_id_data_holder())) {
+            ct_treestore.update_node_aux_icon(tree_iter);
+        }
+        return false;
+    });
     _pCtMainWin->update_window_save_needed(CtSaveNeededUpdType::npro);
 
-    // if this node belongs to a shared group, we need to update all the nodes of the group
-    CtSharedNodesMap shared_nodes_map;
-    if (ct_treestore.populate_shared_nodes_map(shared_nodes_map) > 0u) {
-        const gint64 currNodeId = currTreeIter.get_node_id();
-        const gint64 currNodeMasterId = currTreeIter.get_node_shared_master_id();
-        for (auto& currPair : shared_nodes_map) {
-            if (currNodeId == currPair.first or
-                currNodeMasterId == currPair.first)
-            {
-                // add the master id to the set of non master ids of the group
-                currPair.second.insert(currPair.first);
-                // loop all the ids of the group
-                for (const gint64 nodeId : currPair.second) {
-                    CtTreeIter other_ct_tree_iter = ct_treestore.get_node_from_node_id(nodeId);
-                    if (other_ct_tree_iter) {
-                        other_ct_tree_iter->set_value(ct_treestore.get_columns().colNodeIsReadOnly, node_is_ro);
-                        ct_treestore.update_node_aux_icon(other_ct_tree_iter);
-                    }
-                }
-                break;
-            }
-        }
-    }
-    if (_pCtMainWin->curr_tree_iter().get_node_id() == currTreeIter.get_node_id()) {
-        _pCtMainWin->get_text_view().mm().set_editable(not node_is_ro);
-        _pCtMainWin->window_header_update_lock_icon(node_is_ro);
+    if (_pCtMainWin->curr_tree_iter()) {
+        _pCtMainWin->get_text_view().mm().set_editable(not _pCtMainWin->curr_tree_iter().get_node_read_only());
+        _pCtMainWin->window_header_update_lock_icon(_pCtMainWin->curr_tree_iter().get_node_read_only());
         _pCtMainWin->update_selected_node_statusbar_info();
         _pCtMainWin->get_text_view().mm().grab_focus();
     }
@@ -941,28 +1005,46 @@ bool CtActions::node_move(Gtk::TreeModel::Path src_path, Gtk::TreeModel::Path de
     return true;
 }
 
-void CtActions::tree_sort_ascending()
+void CtActions::_tree_sort(bool ascending)
 {
     if (_in_action) { spdlog::debug("?? 2*{}", __FUNCTION__); return; }
     _in_action = true;
     auto on_scope_exit = scope_guard([this](void*) { _in_action = false; });
 
-    if (_tree_sort_level_and_sublevels(_pCtMainWin->get_tree_store().get_store()->children(), true)) {
-        _pCtMainWin->get_tree_store().nodes_sequences_fix(Gtk::TreeModel::iterator(), true);
-        _pCtMainWin->update_window_save_needed();
+    const CtTreeSelectionSnapshot snapshot = _pCtMainWin->tree_selection_snapshot();
+    std::vector<gint64> selected_ids;
+    for (CtTreeIter tree_iter : snapshot.physicalRows) selected_ids.push_back(tree_iter.get_node_id());
+    const gint64 cursor_id = snapshot.cursor ? snapshot.cursor.get_node_id() : -1;
+    bool changed{false};
+    {
+        auto batch_guard = _pCtMainWin->tree_model_batch_guard();
+        changed = _tree_sort_level_and_sublevels(_pCtMainWin->get_tree_store().get_store()->children(), ascending);
+        if (changed) {
+            _pCtMainWin->get_tree_store().nodes_sequences_fix(Gtk::TreeModel::iterator(), true);
+            _pCtMainWin->update_window_save_needed();
+            auto selection = _pCtMainWin->get_tree_view().get_selection();
+            selection->unselect_all();
+            if (CtTreeIter cursor_iter = _pCtMainWin->get_tree_store().get_node_from_node_id(cursor_id)) {
+                _pCtMainWin->get_tree_view().set_cursor_safe(cursor_iter);
+            }
+            for (const gint64 node_id : selected_ids) {
+                if (CtTreeIter tree_iter = _pCtMainWin->get_tree_store().get_node_from_node_id(node_id)) {
+                    selection->select(_pCtMainWin->get_tree_store().get_path(tree_iter));
+                }
+            }
+        }
     }
+    if (changed) _pCtMainWin->refresh_multi_node_editor();
+}
+
+void CtActions::tree_sort_ascending()
+{
+    _tree_sort(true);
 }
 
 void CtActions::tree_sort_descending()
 {
-    if (_in_action) { spdlog::debug("?? 2*{}", __FUNCTION__); return; }
-    _in_action = true;
-    auto on_scope_exit = scope_guard([this](void*) { _in_action = false; });
-
-    if (_tree_sort_level_and_sublevels(_pCtMainWin->get_tree_store().get_store()->children(), false)) {
-        _pCtMainWin->get_tree_store().nodes_sequences_fix(Gtk::TreeModel::iterator(), true);
-        _pCtMainWin->update_window_save_needed();
-    }
+    _tree_sort(false);
 }
 
 void CtActions::node_siblings_sort_ascending()
@@ -1013,7 +1095,7 @@ void CtActions::node_go_back()
     while (new_node_id > 0) {
         auto node_iter = _pCtMainWin->get_tree_store().get_node_from_node_id(new_node_id);
         if (node_iter) {
-            _pCtMainWin->get_tree_view().set_cursor_safe(node_iter);
+            _pCtMainWin->select_tree_iter_only(node_iter);
             break;
         }
         new_node_id = ct_state_machine.requested_visited_previous();
@@ -1036,53 +1118,47 @@ void CtActions::node_go_forward()
     while (new_node_id > 0) {
         auto node_iter = _pCtMainWin->get_tree_store().get_node_from_node_id(new_node_id);
         if (node_iter) {
-            _pCtMainWin->get_tree_view().set_cursor_safe(node_iter);
+            _pCtMainWin->select_tree_iter_only(node_iter);
             break;
         }
         new_node_id = ct_state_machine.requested_visited_next();
     }
 }
 
-void CtActions::bookmark_curr_node()
+void CtActions::_set_selected_nodes_bookmarked(bool bookmarked)
 {
     if (_in_action) { spdlog::debug("?? 2*{}", __FUNCTION__); return; }
     _in_action = true;
     auto on_scope_exit = scope_guard([this](void*) { _in_action = false; });
 
     if (not _is_there_selected_node_or_error()) return;
-    CtTreeIter tree_iter = _tree_cursor_iter();
-    gint64 node_id = tree_iter.get_node_id();
-
-    if (_pCtMainWin->get_tree_store().bookmarks_add(node_id)) {
-        _pCtMainWin->menu_set_bookmark_menu_items();
+    const auto selected = _pCtMainWin->tree_selection_snapshot().physical_or_cursor();
+    bool changed{false};
+    for (CtTreeIter tree_iter : selected) {
+        const bool node_changed = bookmarked ?
+            _pCtMainWin->get_tree_store().bookmarks_add(tree_iter.get_node_id()) :
+            _pCtMainWin->get_tree_store().bookmarks_remove(tree_iter.get_node_id());
+        if (not node_changed) continue;
+        changed = true;
         _pCtMainWin->get_tree_store().update_node_aux_icon(tree_iter);
-        if (_pCtMainWin->curr_tree_iter().get_node_id() == node_id) {
-            _pCtMainWin->window_header_update_bookmark_icon(true);
-            _pCtMainWin->menu_update_bookmark_menu_item(true);
-        }
+    }
+    if (changed) {
+        _pCtMainWin->menu_set_bookmark_menu_items();
+        const bool active_bookmarked = _pCtMainWin->get_tree_store().is_node_bookmarked(_pCtMainWin->curr_tree_iter().get_node_id());
+        _pCtMainWin->window_header_update_bookmark_icon(active_bookmarked);
+        _pCtMainWin->menu_update_bookmark_menu_item(active_bookmarked);
         _pCtMainWin->update_window_save_needed(CtSaveNeededUpdType::book);
     }
 }
 
+void CtActions::bookmark_curr_node()
+{
+    _set_selected_nodes_bookmarked(true);
+}
+
 void CtActions::bookmark_curr_node_remove()
 {
-    if (_in_action) { spdlog::debug("?? 2*{}", __FUNCTION__); return; }
-    _in_action = true;
-    auto on_scope_exit = scope_guard([this](void*) { _in_action = false; });
-
-    if (not _is_there_selected_node_or_error()) return;
-    CtTreeIter tree_iter = _tree_cursor_iter();
-    gint64 node_id = tree_iter.get_node_id();
-
-    if (_pCtMainWin->get_tree_store().bookmarks_remove(node_id)) {
-        _pCtMainWin->menu_set_bookmark_menu_items();
-        _pCtMainWin->get_tree_store().update_node_aux_icon(tree_iter);
-        if (_pCtMainWin->curr_tree_iter().get_node_id() == node_id) {
-            _pCtMainWin->window_header_update_bookmark_icon(false);
-            _pCtMainWin->menu_update_bookmark_menu_item(false);
-        }
-        _pCtMainWin->update_window_save_needed(CtSaveNeededUpdType::book);
-    }
+    _set_selected_nodes_bookmarked(false);
 }
 
 void CtActions::bookmarks_handle()
@@ -1120,5 +1196,6 @@ void CtActions::tree_clear_property_exclude_from_search()
 void CtActions::node_link_to_clipboard()
 {
     if (not _is_there_selected_node_or_error()) return;
-    CtClipboard(_pCtMainWin).node_link_to_clipboard(_tree_cursor_iter());
+    CtClipboard(_pCtMainWin).node_links_to_clipboard(
+        _pCtMainWin->tree_selection_snapshot().physical_or_cursor());
 }

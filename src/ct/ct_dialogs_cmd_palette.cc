@@ -66,8 +66,9 @@ std::string CtDialogs::dialog_palette(CtMainWin* pCtMainWin)
 
     auto list_store = Gtk::ListStore::create(columns);
     int order_cnt = 0;
+    const CtTreeSelectionSnapshot selection = pCtMainWin->tree_selection_snapshot();
     for (auto& action : pCtMainWin->get_ct_menu().get_actions()) {
-        if (action.category.empty()) continue;
+        if (action.category.empty() or not pCtMainWin->get_ct_menu().is_action_enabled(action, selection)) continue;
         auto iter = *list_store->append();
         iter[columns.order] = ++order_cnt;
         iter[columns.id] = action.id;

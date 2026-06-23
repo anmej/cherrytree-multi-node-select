@@ -21,6 +21,74 @@ constexpr int MULTI_NODE_SECTION_MAX_HEIGHT{600};
 
 }
 
+CtMainWin::TreeModelBatchGuard::TreeModelBatchGuard(CtMainWin* pCtMainWin, TreeModelBatchMode mode)
+ : _pCtMainWin{pCtMainWin}
+{
+    _pCtMainWin->_tree_model_batch_enter(mode);
+}
+
+CtMainWin::TreeModelBatchGuard::TreeModelBatchGuard(TreeModelBatchGuard&& other) noexcept
+ : _pCtMainWin{std::exchange(other._pCtMainWin, nullptr)}
+{
+}
+
+CtMainWin::TreeModelBatchGuard& CtMainWin::TreeModelBatchGuard::operator=(TreeModelBatchGuard&& other) noexcept
+{
+    if (this != &other) {
+        if (_pCtMainWin) _pCtMainWin->_tree_model_batch_exit();
+        _pCtMainWin = std::exchange(other._pCtMainWin, nullptr);
+    }
+    return *this;
+}
+
+CtMainWin::TreeModelBatchGuard::~TreeModelBatchGuard()
+{
+    if (_pCtMainWin) _pCtMainWin->_tree_model_batch_exit();
+}
+
+CtMainWin::TreeModelBatchGuard CtMainWin::tree_model_batch_guard(TreeModelBatchMode mode)
+{
+    return TreeModelBatchGuard{this, mode};
+}
+
+void CtMainWin::_tree_model_batch_enter(TreeModelBatchMode mode)
+{
+    ++_multiNodeEditorRebuildDepth;
+    _multiNodeEditorRebuilding = true;
+    ++_multiNodeEditorGeneration;
+    if (mode == TreeModelBatchMode::DetachEditorBindings) {
+        try {
+            _detach_tree_editor_for_model_change();
+        }
+        catch (...) {
+            _tree_model_batch_exit();
+            throw;
+        }
+    }
+}
+
+void CtMainWin::_tree_model_batch_exit()
+{
+    if (0 == _multiNodeEditorRebuildDepth) {
+        spdlog::error("!! unbalanced {}", __FUNCTION__);
+        return;
+    }
+    --_multiNodeEditorRebuildDepth;
+    _multiNodeEditorRebuilding = _multiNodeEditorRebuildDepth > 0;
+}
+
+void CtMainWin::_detach_tree_editor_for_model_change()
+{
+    _clear_multi_node_editor();
+    _uCtTreestore->disconnect_text_view_connections();
+    _uCtTreeview->get_selection()->unselect_all();
+    _activeTreeIter = CtTreeIter{};
+    _prevTreeIter = CtTreeIter{};
+    _pActiveTextview = &_ctTextview;
+    CtTreeIter no_tree_iter;
+    _uCtTreestore->text_view_apply_textbuffer(no_tree_iter, &_ctTextview);
+}
+
 void CtMainWin::_setup_multi_node_editor()
 {
     _multiNodePrevButton.set_label(_("Previous"));
@@ -71,8 +139,7 @@ void CtMainWin::_update_multi_node_section_height(CtTextView& text_view)
 void CtMainWin::_clear_multi_node_editor()
 {
     if (not _multiNodeMode and _multiNodeSections.empty()) return;
-    _multiNodeEditorRebuilding = true;
-    ++_multiNodeEditorGeneration;
+    auto rebuild_guard = tree_model_batch_guard();
 
     // Event handlers can run synchronously while focused widgets are removed.
     // Stop exposing a temporary text view before disconnecting or destroying it.
@@ -116,7 +183,6 @@ void CtMainWin::_clear_multi_node_editor()
     _scrolledwindowText.set_overlay_scrolling(static_cast<bool>(_pCtConfig->overlayScroll));
     _multiNodeMode = false;
     _ctTextview.set_scroll_beyond_last_line(_pCtConfig->scrollBeyondLastLine);
-    _multiNodeEditorRebuilding = false;
 }
 
 void CtMainWin::_show_multi_node_editor(const std::vector<CtTreeIter>& tree_iters, size_t requested_page_start)
@@ -126,9 +192,11 @@ void CtMainWin::_show_multi_node_editor(const std::vector<CtTreeIter>& tree_iter
     const CtTreeIter cursor_iter = tree_cursor_iter();
     const gint64 cursor_node_id = cursor_iter ? cursor_iter.get_node_id() : -1;
     _clear_multi_node_editor();
-    _multiNodeEditorRebuilding = true;
-    const guint64 generation = ++_multiNodeEditorGeneration;
-    _uCtTreestore->disconnect_text_view_connections();
+    CtMultiNodeSection* pActiveSection{nullptr};
+    {
+        auto rebuild_guard = tree_model_batch_guard();
+        const guint64 generation = _multiNodeEditorGeneration;
+        _uCtTreestore->disconnect_text_view_connections();
 
 #if GTKMM_MAJOR_VERSION >= 4
     _scrolledwindowText.set_child(_multiNodeBox);
@@ -202,7 +270,6 @@ void CtMainWin::_show_multi_node_editor(const std::vector<CtTreeIter>& tree_iter
         main_view_node_id = tree_iters[page_start].get_node_id();
     }
 
-    CtMultiNodeSection* pActiveSection{nullptr};
     bool main_view_used{false};
     for (size_t i = page_start; i < page_end; ++i) {
         auto section = std::make_unique<CtMultiNodeSection>();
@@ -296,7 +363,7 @@ void CtMainWin::_show_multi_node_editor(const std::vector<CtTreeIter>& tree_iter
 #else
     _multiNodeBox.show_all();
 #endif
-    _multiNodeEditorRebuilding = false;
+    }
     if (pActiveSection) {
         _set_active_editor(pActiveSection->treeIter, pActiveSection->textView);
     }

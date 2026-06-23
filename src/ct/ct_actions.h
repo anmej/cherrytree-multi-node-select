@@ -31,11 +31,25 @@
 #include "ct_types.h"
 #include "ct_filesystem.h"
 #include <optional>
+#include <unordered_set>
 
 class CtMainWin;
 class CtImporterInterface;
 struct CtImportedNode;
 struct TocEntry;
+
+struct CtTreeDeletePlan
+{
+    std::vector<gint64> rootNodeIds;
+    std::vector<gint64> removalNodeIds;
+    std::unordered_set<gint64> removalNodeIdSet;
+    gint64 fallbackNodeId{-1};
+    bool hasReadOnlyRoot{false};
+    Glib::ustring confirmationText;
+
+    explicit operator bool() const { return not rootNodeIds.empty(); }
+};
+
 class CtActions
 {
 public:
@@ -147,6 +161,10 @@ private:
                          bool ascendings);
     bool _tree_sort_level_and_sublevels(const Gtk::TreeNodeChildren& children,
                                         bool ascending);
+    void _tree_sort(bool ascending);
+    void _set_selected_nodes_bookmarked(bool bookmarked);
+    void _repair_shared_nodes_before_delete(const CtTreeDeletePlan& plan);
+    bool _apply_tree_delete_plan(const CtTreeDeletePlan& plan);
     void _node_date(const bool from_sel_not_root, const int days_offset = 0);
 
 public:
@@ -175,6 +193,7 @@ public:
                               CtMainWin* pWinToCopyFrom);
     void node_edit();
     void node_inherit_syntax();
+    CtTreeDeletePlan build_tree_delete_plan(const CtTreeSelectionSnapshot& selection);
     void node_delete();
     void node_toggle_read_only();
     void node_date_from_root() { _node_date(false/*from_sel_not_root*/); }

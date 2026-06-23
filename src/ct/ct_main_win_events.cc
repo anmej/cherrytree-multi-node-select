@@ -41,20 +41,40 @@ CtTreeIter CtMainWin::tree_cursor_iter()
 
 std::vector<CtTreeIter> CtMainWin::selected_tree_iters()
 {
-    std::vector<CtTreeIter> ret;
-    if (not _uCtTreeview or not _uCtTreestore) return ret;
+    return tree_selection_snapshot().logicalDataHolders;
+}
+
+std::vector<CtTreeIter> CtMainWin::selected_tree_row_iters()
+{
+    return tree_selection_snapshot().physicalRows;
+}
+
+CtTreeSelectionSnapshot CtMainWin::tree_selection_snapshot()
+{
+    CtTreeSelectionSnapshot snapshot;
+    snapshot.cursor = tree_cursor_iter();
+    if (not _uCtTreeview or not _uCtTreestore) return snapshot;
 
     std::unordered_set<gint64> seen_data_holders;
     for (const auto& path : _uCtTreeview->get_selection()->get_selected_rows()) {
-        auto iter = _uCtTreeview->get_model()->get_iter(path);
-        if (not iter) continue;
-        CtTreeIter tree_iter = _uCtTreestore->to_ct_tree_iter(iter);
-        const gint64 data_holder_id = tree_iter.get_node_id_data_holder();
-        if (seen_data_holders.insert(data_holder_id).second) {
-            ret.push_back(tree_iter);
+        if (auto iter = _uCtTreeview->get_model()->get_iter(path)) {
+            CtTreeIter tree_iter = _uCtTreestore->to_ct_tree_iter(iter);
+            snapshot.physicalRows.push_back(tree_iter);
+            if (seen_data_holders.insert(tree_iter.get_node_id_data_holder()).second) {
+                snapshot.logicalDataHolders.push_back(tree_iter);
+            }
         }
     }
-    return ret;
+    return snapshot;
+}
+
+void CtMainWin::select_tree_iter_only(CtTreeIter tree_iter)
+{
+    if (not tree_iter or not _uCtTreeview) return;
+    auto selection = _uCtTreeview->get_selection();
+    selection->unselect_all();
+    _uCtTreeview->set_cursor_safe(tree_iter);
+    selection->select(_uCtTreestore->get_path(tree_iter));
 }
 
 void CtMainWin::_store_previous_editor_state(CtTreeIter next_tree_iter)
@@ -99,6 +119,7 @@ void CtMainWin::_set_active_editor(CtTreeIter tree_iter, CtTextView* pTextView, 
 void CtMainWin::_on_treeview_selection_changed()
 {
     if (_multiNodeEditorRebuilding) return;
+    _uCtMenu->refresh_action_sensitivity();
     auto selected = selected_tree_iters();
     if (selected.size() > 1) {
         _show_multi_node_editor(selected);
@@ -374,7 +395,7 @@ bool CtMainWin::_on_treeview_key_press_event(GdkEventKey* event)
             return true;
         }
         if (GDK_KEY_Delete == event->keyval) {
-            _uCtActions->node_delete();
+            _uCtMenu->activate_action("tree_node_del");
             return true;
         }
         {
@@ -410,6 +431,27 @@ bool CtMainWin::_on_treeview_scroll_event(GdkEventScroll* event)
     return true;
 }
 #endif /* GTKMM_MAJOR_VERSION < 4 */
+
+#if GTKMM_MAJOR_VERSION >= 4
+void CtMainWin::_setup_treeview_key_controller_gtk4()
+{
+    _treeKeyController4 = Gtk::EventControllerKey::create();
+    _treeKeyController4->signal_key_pressed().connect(
+        sigc::mem_fun(*this, &CtMainWin::_on_treeview_key_pressed_gtk4), false);
+    _uCtTreeview->add_controller(_treeKeyController4);
+}
+
+bool CtMainWin::_on_treeview_key_pressed_gtk4(guint keyval, guint /*keycode*/, Gdk::ModifierType state)
+{
+    const bool has_control = bool(state & Gdk::ModifierType::CONTROL_MASK);
+    const bool has_alt = bool(state & Gdk::ModifierType::ALT_MASK);
+    if (GDK_KEY_Delete == keyval and not has_control and not has_alt) {
+        _uCtMenu->activate_action("tree_node_del");
+        return true;
+    }
+    return false;
+}
+#endif /* GTKMM_MAJOR_VERSION >= 4 */
 
 // Extend the Default Right-Click Menu
 #if GTKMM_MAJOR_VERSION < 4

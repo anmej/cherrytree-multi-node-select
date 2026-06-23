@@ -81,6 +81,7 @@ void TestCtApp::_run_test(const fs::path doc_filepath_from, const fs::path doc_f
     CtMainWin* pWin = _create_window(true/*start_hidden*/);
     // tree empty
     ASSERT_FALSE(pWin->get_tree_store().get_iter_first());
+    assert_empty_tree_batch_delete(pWin);
     // load file
     ASSERT_TRUE(pWin->file_open(doc_filepath_from, ""/*node_to_focus*/, ""/*anchor_to_focus*/, docEncrypt_from != CtDocEncrypt::True ? "" : UT::testPassword));
     assert_multi_node_selection(pWin);
@@ -96,8 +97,12 @@ void TestCtApp::_run_test(const fs::path doc_filepath_from, const fs::path doc_f
                        docEncrypt_to != CtDocEncrypt::True ? "" : UT::testPasswordBis);
 
     // close this window/tree
+    queue_deferred_menu_action_for_teardown(pWin);
     pWin->force_exit() = true;
     remove_window(*pWin);
+    while (Glib::MainContext::get_default()->pending()) {
+        Glib::MainContext::get_default()->iteration(false);
+    }
 
     // new empty window/tree
     CtMainWin* pWin2 = _create_window(true/*start_hidden*/);

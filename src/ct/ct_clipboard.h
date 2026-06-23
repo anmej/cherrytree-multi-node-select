@@ -62,7 +62,7 @@ public:
     void          table_row_paste(CtTableCommon* pTable);
     void          table_column_to_clipboard(CtTableCommon* pTable);
     void          table_column_paste(CtTableCommon* pTable);
-    void          node_link_to_clipboard(CtTreeIter node);
+    void          node_links_to_clipboard(const std::vector<CtTreeIter>& nodes);
     void          anchor_link_to_clipboard(CtTreeIter node, const Glib::ustring& anchor_name);
     Glib::ustring rich_text_get_from_text_buffer_selection(CtTreeIter node_iter,
                                                            Glib::RefPtr<Gtk::TextBuffer> text_buffer,

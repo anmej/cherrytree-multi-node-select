@@ -63,10 +63,25 @@ Multi-selection introduces three related but different concepts:
   node.
 - `selected_tree_iters()` is the complete logical selection, returned in tree
   order and deduplicated by data-holder ID.
+- `selected_tree_row_iters()` is the complete structural selection in tree
+  order. It preserves every selected row, including multiple aliases that
+  share one data holder, and is used by batch tree actions.
+- `tree_selection_snapshot()` captures the cursor plus both selections once at
+  an action-dispatch boundary. Tree actions declare whether they require one
+  physical row, batch physical rows, navigate to one row, ignore selection, or
+  preserve selection while refreshing its order. `CtMenu` uses that declaration
+  for every menu, toolbar, palette, Gio action, accelerator, and direct-key path.
 
 Text editing, formatting, clipboard operations, status information, and
 embedded-widget actions use the focused editor pair. Structural tree actions
 use the tree cursor even when focus is inside a different selected section.
+
+Tree commands with an inherently singular target (for example adding a child,
+editing properties, pasting a subtree, or moving a node) are disabled while
+multiple physical rows are selected. Read-only, node-link, bookmark, and delete
+commands operate on the physical selection; read-only first deduplicates shared
+data holders. Whole-tree sorting keeps the selection and rebuilds the editor in
+the new tree order.
 
 `CtMainWin::_set_active_editor()` updates `_activeTreeIter` and
 `_pActiveTextview` together. It also stores the previous editor's modified and
@@ -142,7 +157,7 @@ view.
 
 1. Preserve the active node and tree cursor IDs.
 2. Clear any previous multi-node UI.
-3. Mark the editor as rebuilding and advance the generation counter.
+3. Enter a scoped tree-model batch guard, which advances the generation counter.
 4. Replace the permanent text-view child with `_multiNodeBox`.
 5. Select the page and decide whether bounded section scrollers are required.
 6. Create, bind, and insert each rendered section.
@@ -162,14 +177,25 @@ temporary section must therefore never remain visible through
 
 Teardown follows this order:
 
-1. Set `_multiNodeEditorRebuilding` and advance `_multiNodeEditorGeneration`.
+1. Enter a scoped tree-model batch guard.
 2. Point `_pActiveTextview` back to `_ctTextview`.
 3. Disconnect tree-store buffer connections.
 4. Disconnect every section's focus and height connections.
 5. Remove section widgets from their containers.
 6. Clear `_multiNodeSections` and restore `_ctTextview` to the outer scroller.
 7. Restore normal scrolling and presentation settings.
-8. Clear the rebuild guard.
+8. Leave the guard; nested guards keep callbacks suppressed until the outermost scope exits.
+
+Structural model mutations use the same move-only RAII guard. Deletion uses its
+detach mode to clear active and previous tree iterators and unbind the permanent
+editor before rows are erased; sorting preserves the editor and selection. This
+keeps exception unwinding and nested teardown from exposing stale tree iterators.
+
+Deletion is planned before its confirmation dialog. `CtTreeDeletePlan` contains
+only stable node IDs: canonical selected roots, the complete removal set, the
+fallback node, read-only rejection, and confirmation text. Shared-master repair,
+bookmark/storage updates, and reverse-order erasure re-resolve those IDs instead
+of carrying tree iterators across the dialog.
 
 Section callbacks capture stable node and view identifiers, not a raw section
 pointer. Before accessing a section they verify the rebuild generation and use
@@ -231,6 +257,10 @@ from the existing read/write application lifecycle. It covers:
 - repeated focus changes, rebuilds, and single-selection teardown;
 - inner scrollers for large documents;
 - 25-section paging while retaining all selected paths.
+
+`tests/tests_tree_multi_selection.cpp` covers the tree-action registry and
+availability matrix, batch actions, delete-plan construction and application,
+nested guard unwinding, empty-tree deletion, and deferred GTK3 dispatch teardown.
 
 Run the focused integration case while iterating:
 
